@@ -1,14 +1,34 @@
 //g++ analogin_trigger.cpp -ldwf
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "sample.h"
 
+void exit_handler( int s) {
+    printf("Exiting...\n");	
+    FDwfDeviceCloseAll();
+    exit(0);
+}
 
 int main(int carg, char **szarg){
     HDWF hdwf;
     STS sts;
     int cSamples = 8192;
-    double *rgdSamples = new double[cSamples];
+    double *vinSamples = new double[cSamples];
+    double *voutSamples = new double[cSamples];
     char szError[512] = {0};
-    FILE* logfile = fopen("logfile.txt", "a");
+    FILE* vin = fopen("vin.txt", "a");
+    FILE* vout = fopen("vout.txt", "a");
+
+
+    //Catch ctrl-c events
+    struct sigaction sigIntHandler;
+    sigIntHandler.sa_handler = exit_handler;
+    sigemptyset(&sigIntHandler.sa_mask);
+    sigIntHandler.sa_flags = 0;
+    sigaction(SIGINT, &sigIntHandler, NULL);
+
+
 
     printf("Open automatically the first available device\n");
     if(!FDwfDeviceOpen(-1, &hdwf)) {
@@ -21,13 +41,17 @@ int main(int carg, char **szarg){
     //8192 samples =~ 16ms
     FDwfAnalogInFrequencySet(hdwf, 500000.0);
     FDwfAnalogInBufferSizeSet(hdwf, cSamples);
+    //vin
     FDwfAnalogInChannelEnableSet(hdwf, 0, true);
     FDwfAnalogInChannelRangeSet(hdwf, 0, 5.0);
+    //vout
+    FDwfAnalogInChannelEnableSet(hdwf, 1, true);
+    FDwfAnalogInChannelRangeSet(hdwf, 1, 5.0);
 
     // set up trigger
     // disable auto trigger
     FDwfAnalogInTriggerAutoTimeoutSet(hdwf, 0);
-    // one of the analog in channels
+ 
     FDwfAnalogInTriggerSourceSet(hdwf, trigsrcExternal1); //T1
     FDwfAnalogInTriggerTypeSet(hdwf, trigtypeEdge);
     // first channel
@@ -50,17 +74,21 @@ int main(int carg, char **szarg){
             }
             Wait(0.001);
         }
-        FDwfAnalogInStatusData(hdwf, 0, rgdSamples, cSamples);
-        double vAvg = 0;
-	
+        FDwfAnalogInStatusData(hdwf, 0, vinSamples, cSamples);
+	FDwfAnalogInStatusData(hdwf, 0, voutSamples, cSamples);
+	printf("Triggered...\n");
         for(int i = 0; i < cSamples; i++){
-	    fprintf(logfile, "%f, ", rgdSamples[i]);
-            vAvg += rgdSamples[i];
+	    if(i < cSamples-1) {
+	    	fprintf(vin, "%f, ", vinSamples[i]);
+	    	fprintf(vout, "%f, ", voutSamples[i]);
+	    } else {
+		fprintf(vin, "%f\n", vinSamples[i]);
+	    	fprintf(vout, "%f\n", voutSamples[i]);
+	    }
         }
-	fprintf(logfile, "\n");
-	fflush(logfile);
-        vAvg /= cSamples;
-        printf(" #%i average: %.3lf V\n", iTrigger+1, vAvg);
+	fflush(vin);
+	fflush(vout);
     }
+
     FDwfDeviceCloseAll();
 }
